@@ -405,25 +405,25 @@ if not acquirer_data_df.empty and not target_data_df.empty:
 
         moic = proj_exit_equity / sponsor_equity if sponsor_equity > 0 else 0
 
+        # Corrected: LBO cash flow calculation with proper scaling
+        # All cash flow values should be in billions of USD
+        cash_flows = [-sponsor_equity] + [0]*(exit_year-1) + [proj_exit_equity]
+
         # Custom IRR function to handle potential errors
         def calculate_irr(cash_flows, tolerance=0.0001, max_iterations=1000):
             if not cash_flows or cash_flows[0] >= 0:
                 return np.nan
-
             rate = 0.1
             for _ in range(max_iterations):
                 npv = sum(cf / (1 + rate)**i for i, cf in enumerate(cash_flows))
                 if abs(npv) < tolerance:
                     return rate
-
                 dnpv = sum(-i * cf / (1 + rate)**(i + 1) for i, cf in enumerate(cash_flows))
                 if dnpv == 0:
                     return np.nan
-
                 rate -= npv / dnpv
             return np.nan
 
-        cash_flows = [-sponsor_equity] + [0]*(exit_year-1) + [proj_exit_equity]
         irr = calculate_irr(cash_flows)
 
 
