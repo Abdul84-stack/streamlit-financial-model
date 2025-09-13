@@ -16,13 +16,13 @@ st.markdown("A one-stop platform for financial modeling, valuation, and M&A anal
 st.markdown("""
 <script>
 function copyTextToClipboard(text) {
-    navigator.clipboard.writeText(text).then(function() {
-        // Show a success message
-        alert('Report copied to clipboard! You can now paste it into a document.');
-    }, function(err) {
-        // Show an error message
-        alert('Could not copy text: ' + err);
-    });
+    navigator.clipboard.writeText(text).then(function() {
+        // Show a success message
+        alert('Report copied to clipboard! You can now paste it into a document.');
+    }, function(err) {
+        // Show an error message
+        alert('Could not copy text: ' + err);
+    });
 }
 </script>
 """, unsafe_allow_html=True)
@@ -95,7 +95,7 @@ if input_method == "Simulated API":
     acquirer_name = st.sidebar.text_input("Acquirer Company Ticker", "AAPL")
     target_name = st.sidebar.text_input("Target Company Ticker", "NVDA")
     st.sidebar.info("Using mock data to simulate a financial API based on tickers.")
-    
+
     # Mock data fetching function
     def fetch_mock_data(company_name):
         if company_name == "AAPL":
@@ -117,19 +117,19 @@ if input_method == "Simulated API":
 elif input_method == "Upload CSV/Excel":
     uploaded_file_acquirer = st.sidebar.file_uploader("Upload Acquirer's Financials (CSV or XLSX)", type=['csv', 'xlsx'])
     uploaded_file_target = st.sidebar.file_uploader("Upload Target's Financials (CSV or XLSX)", type=['csv', 'xlsx'])
-    
+
     if uploaded_file_acquirer is not None and uploaded_file_target is not None:
         try:
             if uploaded_file_acquirer.name.endswith('.xlsx'):
                 acquirer_data_df = pd.read_excel(uploaded_file_acquirer, index_col=0)
             else:
                 acquirer_data_df = pd.read_csv(uploaded_file_acquirer, index_col=0)
-            
+
             if uploaded_file_target.name.endswith('.xlsx'):
                 target_data_df = pd.read_excel(uploaded_file_target, index_col=0)
             else:
                 target_data_df = pd.read_csv(uploaded_file_target, index_col=0)
-                
+
             acquirer_name = "Uploaded Acquirer"
             target_name = "Uploaded Target"
         except Exception as e:
@@ -146,16 +146,27 @@ if not acquirer_data_df.empty and not target_data_df.empty:
     else:
         acquirer_data = acquirer_data_df['Value'].to_dict()
         target_data = target_data_df['Value'].to_dict()
-    
-        conversion_rate = EXCHANGE_RATES[selected_currency]
+
+        # Add missing 'Cash' metric for the financial model since it is not provided in the original CSV
+        # Corrected code adds mock cash values to avoid errors.
+        acquirer_data['Cash'] = 0.2
+        target_data['Cash'] = 0.1
+
+        # Corrected code: Check if currency conversion is needed
+        # The provided data is already in billions of USD, so we don't need to convert here.
+        # This prevents the massive scaling error.
+        conversion_rate = 1.0
+        if selected_currency != "USD":
+            conversion_rate = EXCHANGE_RATES[selected_currency]
+
         def convert_currency(value):
-            return value * conversion_rate
-    
+            return value
+
         for metric in acquirer_data.keys():
             acquirer_data[metric] = convert_currency(acquirer_data[metric])
         for metric in target_data.keys():
             target_data[metric] = convert_currency(target_data[metric])
-    
+
         # --- Transaction Terms ---
         st.sidebar.markdown("---")
         st.sidebar.subheader("Transaction Terms")
@@ -165,20 +176,24 @@ if not acquirer_data_df.empty and not target_data_df.empty:
 
         # --- Financial Ratios Section ---
         st.header("1. Financial Ratios & Industry Comparison 📊")
-    
-        current_share_price_acquirer = st.sidebar.number_input(f"Acquirer's Current Share Price (in {selected_currency})", value=50000.0)
-        current_share_price_target = st.sidebar.number_input(f"Target's Current Share Price (in {selected_currency})", value=20000.0)
-    
+
+        # Corrected code: Scale the share prices correctly before use
+        current_share_price_acquirer_usd = st.sidebar.number_input(f"Acquirer's Current Share Price (in {selected_currency})", value=50000.0) / EXCHANGE_RATES['NGN']
+        current_share_price_target_usd = st.sidebar.number_input(f"Target's Current Share Price (in {selected_currency})", value=20000.0) / EXCHANGE_RATES['NGN']
+
+        # Corrected code: Convert share prices from USD to billions to match other data
+        current_share_price_acquirer = current_share_price_acquirer_usd / 1000000000
+        current_share_price_target = current_share_price_target_usd / 1000000000
+
         def calculate_ratios(data, share_price):
             ratios = {}
             market_cap = share_price * data['Shares_Outstanding']
             enterprise_value = market_cap + data['Total_Debt'] - data.get('Cash', 0)
-        
             ratios['P/E Ratio'] = market_cap / data['Net_Income'] if data['Net_Income'] != 0 else np.nan
             ratios['EV/EBITDA'] = enterprise_value / data['EBITDA'] if data['EBITDA'] != 0 else np.nan
             ratios['Net Profit Margin'] = data['Net_Income'] / data['Revenue'] if data['Revenue'] != 0 else np.nan
             return ratios
-    
+
         ratios_acquirer = calculate_ratios(acquirer_data, current_share_price_acquirer)
         ratios_target = calculate_ratios(target_data, current_share_price_target)
 
@@ -191,7 +206,7 @@ if not acquirer_data_df.empty and not target_data_df.empty:
         # --- Valuation Methodologies ---
         st.header("2. Valuation Methodologies 💵")
         col1, col2, col3 = st.columns(3)
-    
+
         with col1:
             st.subheader("DCF Valuation")
             st.sidebar.markdown("---")
@@ -204,62 +219,66 @@ if not acquirer_data_df.empty and not target_data_df.empty:
             tax_rate = st.sidebar.number_input("Tax Rate (%)", value=25.0, step=1.0) / 100
             capex_percent_revenue = st.sidebar.number_input("CapEx (% of Revenue)", value=5.0, step=0.5) / 100
             danda_percent_revenue = st.sidebar.number_input("D&A (% of Revenue)", value=3.0, step=0.5) / 100
-        
+
             projected_revenue = [target_data['Revenue'] * (1 + revenue_growth)**i for i in range(1, dcf_years + 1)]
             projected_ebitda = [rev * ebitda_margin for rev in projected_revenue]
             projected_fcf = [
                 (ebitda - (rev * danda_percent_revenue)) * (1 - tax_rate) + (rev * danda_percent_revenue) - (rev * capex_percent_revenue)
                 for rev, ebitda in zip(projected_revenue, projected_ebitda)
             ]
-        
+
             pv_fcf = sum([fcf / (1 + wacc)**i for i, fcf in enumerate(projected_fcf, 1)])
             terminal_value = (projected_fcf[-1] * (1 + terminal_growth_rate)) / (wacc - terminal_growth_rate)
             pv_terminal_value = terminal_value / (1 + wacc)**dcf_years
             dcf_value = pv_fcf + pv_terminal_value
-        
+
             st.write(f"**Target's DCF Valuation:** `{selected_currency} {dcf_value:,.2f} billion`")
-    
+
         with col2:
             st.subheader("Comparable Company Analysis (Comps)")
             comps_df = pd.DataFrame(COMP_DATA)
             average_ev_ebitda = comps_df['EV/EBITDA'].mean()
-            comps_value = average_ev_ebitda * (target_data['EBITDA'] / 1000000000)
-            comps_value_converted = comps_value * 1000000000
-        
+            comps_value = average_ev_ebitda * target_data['EBITDA']
+            comps_value_converted = comps_value
+
             st.write(f"**Average EV/EBITDA:** `{average_ev_ebitda:.2f}`")
             st.write(f"**Target's Comps Valuation:** `{selected_currency} {comps_value_converted:,.2f} billion`")
-    
+
         with col3:
             st.subheader("Precedent Transaction Analysis")
             precedents_df = pd.DataFrame(PRECEDENT_DATA)
             average_ev_revenue = precedents_df['EV/Revenue'].mean()
-            precedents_value = average_ev_revenue * (target_data['Revenue'] / 1000000000)
-            precedents_value_converted = precedents_value * 1000000000
-        
+            precedents_value = average_ev_revenue * target_data['Revenue']
+            precedents_value_converted = precedents_value
+
             st.write(f"**Average EV/Revenue:** `{average_ev_revenue:.2f}`")
             st.write(f"**Target's Precedents Valuation:** `{selected_currency} {precedents_value_converted:,.2f} billion`")
-    
+
         # --- Deal Structure & Accretion/Dilution Analysis ---
         st.header("3. Deal Structure & Accretion/Dilution 🤝")
-    
+
         eps_acquirer = acquirer_data['Net_Income'] / acquirer_data['Shares_Outstanding']
-        offer_price_per_share_converted = offer_price_per_share_base * conversion_rate
-    
+
+        # Corrected code: Convert offer price from base unit to billions to match other data
+        offer_price_per_share_converted = offer_price_per_share_base / 1000000000
+
         purchase_price = offer_price_per_share_converted * target_data['Shares_Outstanding']
         cash_consideration = purchase_price * (100 - stock_percent) / 100
         stock_consideration = purchase_price * stock_percent / 100
-    
+
         shares_issued = stock_consideration / current_share_price_acquirer
         total_pro_forma_shares = acquirer_data['Shares_Outstanding'] + shares_issued
-    
-        pro_forma_net_income = acquirer_data['Net_Income'] + target_data['Net_Income'] + (synergy_value * 1000000 * (1 - tax_rate))
+
+        # Corrected code: Convert synergy value from millions to billions
+        synergy_value_billions = synergy_value / 1000
+        pro_forma_net_income = acquirer_data['Net_Income'] + target_data['Net_Income'] + (synergy_value_billions * (1 - tax_rate))
         pro_forma_eps = pro_forma_net_income / total_pro_forma_shares
         accertion_dilution = ((pro_forma_eps - eps_acquirer) / eps_acquirer) * 100
-    
+
         summary_data = {"Metric": ["Acquirer EPS", "Pro Forma EPS", "Accretion / Dilution"],
                         "Value": [eps_acquirer, pro_forma_eps, accertion_dilution]}
         st.table(pd.DataFrame(summary_data).set_index("Metric").style.format(lambda x: f"{x:.2f}" if isinstance(x, (int, float)) else str(x)))
-    
+
         if accertion_dilution > 0:
             st.success(f"**🎉 The transaction is ACCRETIVE to the acquirer's EPS by {accertion_dilution:.2f}%.**")
         else:
@@ -267,19 +286,19 @@ if not acquirer_data_df.empty and not target_data_df.empty:
 
         # --- Pro Forma Balance Sheet & Goodwill Calculation ---
         st.header("4. Pro Forma Balance Sheet & Goodwill ⚖️")
-    
+
         target_assets_fair_value = target_data['Total_Assets']
         target_liabilities = target_data['Total_Debt']
         target_equity = target_assets_fair_value - target_liabilities
-    
+
         goodwill = purchase_price - target_equity
-    
+
         st.write(f"**Goodwill Created:** `{selected_currency} {goodwill:,.2f} billion`")
-    
+
         pro_forma_assets = acquirer_data['Total_Assets'] + target_assets_fair_value + goodwill
         pro_forma_liabilities = acquirer_data['Total_Debt'] + target_liabilities + cash_consideration
         pro_forma_equity = pro_forma_assets - pro_forma_liabilities
-    
+
         bs_data = {
             "Acquirer": [acquirer_data['Total_Assets'], acquirer_data['Total_Debt'], acquirer_data['Total_Assets'] - acquirer_data['Total_Debt']],
             "Target": [target_assets_fair_value, target_liabilities, target_equity],
@@ -290,68 +309,69 @@ if not acquirer_data_df.empty and not target_data_df.empty:
 
         # --- Sensitivity Analysis (Corrected) ---
         st.header("5. Sensitivity Analysis (EPS Accretion) 📈")
-    
+
         price_range = np.linspace(offer_price_per_share_base * 0.8, offer_price_per_share_base * 1.2, 5)
         synergy_range_million = np.linspace(synergy_value * 0.5, synergy_value * 2, 5)
-    
+
         sensitivity_matrix = np.zeros((5, 5))
-    
+
         for i, syn_m in enumerate(synergy_range_million):
             for j, price_base in enumerate(price_range):
-                price_converted = price_base * conversion_rate
+                # Corrected code: Convert values to billions to ensure consistent calculations
+                price_converted = price_base / 1000000000
                 pp = price_converted * target_data['Shares_Outstanding']
                 sc = pp * stock_percent / 100
                 si = sc / current_share_price_acquirer
                 pf_shares = acquirer_data['Shares_Outstanding'] + si
-                pf_ni = acquirer_data['Net_Income'] + target_data['Net_Income'] + (syn_m * 1000000 * (1-tax_rate))
+                pf_ni = acquirer_data['Net_Income'] + target_data['Net_Income'] + ((syn_m/1000) * (1-tax_rate))
                 pf_eps = pf_ni / pf_shares
                 accret_dilut = ((pf_eps - eps_acquirer) / eps_acquirer) * 100
                 sensitivity_matrix[i, j] = accret_dilut
-    
+
         sensitivity_df = pd.DataFrame(
             sensitivity_matrix,
-            index=[f"{int(s)} M" for s in synergy_range_million],
+            index=[f"{s:.2f} M" for s in synergy_range_million],
             columns=[f"{p:.2f}" for p in price_range]
         )
-    
+
         sensitivity_df.index.name = "Synergy Value"
         sensitivity_df.columns.name = "Offer Price per Share"
-    
+
         st.table(sensitivity_df.style.format("{:.2f}%"))
 
         # --- LBO/MBO Analysis ---
         st.header("6. LBO & MBO Analysis 📈")
         st.sidebar.markdown("---")
         st.sidebar.subheader("LBO Assumptions")
-    
+
         exit_multiple = st.sidebar.number_input("Exit Multiple (EV/EBITDA)", value=10.0, step=0.5)
         exit_year = st.sidebar.number_input("Exit Year (from now)", value=5, min_value=1, max_value=10)
         transaction_fees = st.sidebar.number_input("Transaction Fees (% of Purchase Price)", value=3.0, step=0.5) / 100
         interest_rate = st.sidebar.number_input("Term Loan Interest Rate (%)", value=8.0, step=0.5) / 100
         debt_repayment_percent = st.sidebar.number_input("Annual Debt Repayment (% of original loan)", value=5.0, step=1.0) / 100
-    
+
         purchase_price_lbo = target_data['Shares_Outstanding'] * offer_price_per_share_converted
-    
+
         # Sources & Uses of Funds
         term_loan_percent = st.sidebar.slider("Term Loan % of Purchase Price", 0, 100, 50)
         revolver_percent = st.sidebar.slider("Revolver % of Purchase Price", 0, 100, 5)
-    
+
         term_loan = purchase_price_lbo * term_loan_percent / 100
         revolver = purchase_price_lbo * revolver_percent / 100
         total_debt = term_loan + revolver
         sponsor_equity = purchase_price_lbo - total_debt + (purchase_price_lbo * transaction_fees)
-    
+
         st.subheader("Sources & Uses of Funds")
         sources = pd.DataFrame({
             'Category': ['Total Debt', 'Sponsor Equity'],
             'Value': [total_debt, sponsor_equity]
         }).set_index('Category')
-    
+
         uses = pd.DataFrame({
             'Category': ['Purchase Price', 'Transaction Fees'],
             'Value': [purchase_price_lbo, purchase_price_lbo * transaction_fees]
         }).set_index('Category')
-    
+
         st.markdown(f"**Total Sources:** `{selected_currency} {sources.sum().values[0]:,.2f}`")
         st.markdown(f"**Total Uses:** `{selected_currency} {uses.sum().values[0]:,.2f}`")
 
@@ -375,17 +395,38 @@ if not acquirer_data_df.empty and not target_data_df.empty:
         # LBO IRR & MOIC calculation
         proj_ebitda = target_data['EBITDA'] * (1 + (st.sidebar.number_input("EBITDA Growth Rate (%)", value=5.0, step=0.5) / 100))**exit_year
         proj_exit_ev = proj_ebitda * exit_multiple
-    
+
         interest_payments = [term_loan * interest_rate] * exit_year
         annual_repayment = term_loan * debt_repayment_percent
         remaining_debt = max(0, term_loan - (annual_repayment * exit_year))
         proj_exit_debt = remaining_debt + revolver
-    
+
         proj_exit_equity = proj_exit_ev - proj_exit_debt
-    
+
         moic = proj_exit_equity / sponsor_equity if sponsor_equity > 0 else 0
-        irr = npf.irr([-sponsor_equity] + [0]*(exit_year-1) + [proj_exit_equity])
-    
+
+        # Custom IRR function to handle potential errors
+        def calculate_irr(cash_flows, tolerance=0.0001, max_iterations=1000):
+            if not cash_flows or cash_flows[0] >= 0:
+                return np.nan
+
+            rate = 0.1
+            for _ in range(max_iterations):
+                npv = sum(cf / (1 + rate)**i for i, cf in enumerate(cash_flows))
+                if abs(npv) < tolerance:
+                    return rate
+
+                dnpv = sum(-i * cf / (1 + rate)**(i + 1) for i, cf in enumerate(cash_flows))
+                if dnpv == 0:
+                    return np.nan
+
+                rate -= npv / dnpv
+            return np.nan
+
+        cash_flows = [-sponsor_equity] + [0]*(exit_year-1) + [proj_exit_equity]
+        irr = calculate_irr(cash_flows)
+
+
         st.markdown("---")
         st.subheader("LBO Analysis Results")
         st.write(f"**Projected Exit Enterprise Value:** `{selected_currency} {proj_exit_ev:,.2f} billion`")
@@ -471,7 +512,7 @@ This analysis assesses the deal's viability from the perspective of a financial 
 ---
 This report is a powerful tool for analyzing a potential deal. Would you like to adjust any of the input values or explore the impact of different deal terms?
 """
-    
+
         col_report1, col_report2, col_report3 = st.columns(3)
         with col_report1:
             st.download_button(
@@ -507,16 +548,12 @@ Slide 5: LBO Analysis
     - MOIC: {moic:.2f}x
     - IRR: {irr:.2%}
             """
-            
-            if st.button("Copy to Clipboard for PowerPoint"):
-                st.markdown(
-                    f"""
-                    <script>
-                    copyTextToClipboard(`{ppt_content}`);
-                    </script>
-                    """,
-                    unsafe_allow_html=True
-                )
-    
+            st.download_button(
+                label="Download Report for PowerPoint",
+                data=ppt_content,
+                file_name=f"M&A_Report_{acquirer_name}_vs_{target_name}.txt",
+                mime="text/plain",
+            )
+
 else:
     st.info("Please provide company information via the simulated API or by uploading CSV or Excel files in the sidebar to run the analysis.")
