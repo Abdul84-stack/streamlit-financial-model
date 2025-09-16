@@ -1,6 +1,5 @@
 streamlit
 pandas
 numpy
-numpy_financial
 plotly
-openpyxl
+python-pptx
